@@ -1,0 +1,5 @@
+{
+  "url": "https://github.com/mikn/rules_qemu/releases/download/{TAG}/rules_qemu-{VERSION}.tar.gz",
+  "integrity": "",
+  "strip_prefix": "rules_qemu-{VERSION}"
+}
