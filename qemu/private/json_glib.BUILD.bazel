@@ -1,0 +1,51 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "meson")
+load("@rules_qemu//qemu/private:cc_static_only.bzl", "cc_static_only")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+)
+
+cc_static_only(
+    name = "glib_static",
+    dep = "@glib//glib",
+)
+
+cc_static_only(
+    name = "gobject_static",
+    dep = "@glib//gobject",
+)
+
+cc_static_only(
+    name = "gio_static",
+    dep = "@glib//gio",
+)
+
+meson(
+    name = "json_glib",
+    env = {
+        # Add BCR dep headers/libs from the rules_foreign_cc staging area.
+        # The meson rule doesn't automatically add dep include/lib paths
+        # (unlike configure_make which uses CPPFLAGS). We inject them via
+        # CFLAGS/LDFLAGS so meson picks them up as native compiler options.
+        "CFLAGS": "-I$$$$EXT_BUILD_DEPS$$$$/include",
+        "LDFLAGS": "-L$$$$EXT_BUILD_DEPS$$$$/lib",
+    },
+    lib_source = ":all_srcs",
+    options = {
+        "libdir": "lib",
+        "default_library": "static",
+        "introspection": "disabled",
+        "gtk_doc": "disabled",
+        "tests": "false",
+        "installed_tests": "false",
+        "nls": "disabled",
+    },
+    out_static_libs = ["libjson-glib-1.0.a"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":glib_static",
+        ":gobject_static",
+        ":gio_static",
+    ],
+)

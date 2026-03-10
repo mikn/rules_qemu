@@ -1,0 +1,37 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+load("@rules_qemu//qemu/private:cc_static_only.bzl", "cc_static_only")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+)
+
+cc_static_only(
+    name = "openssl_static",
+    dep = "@openssl//:crypto",
+)
+
+configure_make(
+    name = "libtpms",
+    autoreconf = True,
+    autoreconf_options = ["-ivf"],
+    configure_in_place = True,
+    configure_options = [
+        "--with-openssl",
+        "--with-tpm2",
+        "--enable-static",
+        "--disable-shared",
+    ],
+    copts = [
+        "-Wno-self-assign",
+        "-Wno-error",
+        # GCC 14+ makes implicit function declarations a hard error (C23).
+        # libtpms has internal functions used across files without headers.
+        "-Wno-implicit-function-declaration",
+        "-Wno-int-conversion",
+    ],
+    lib_source = ":all_srcs",
+    out_static_libs = ["libtpms.a"],
+    visibility = ["//visibility:public"],
+    deps = [":openssl_static"],
+)

@@ -1,0 +1,20 @@
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"]),
+)
+
+configure_make(
+    name = "libtasn1",
+    configure_in_place = True,
+    configure_options = [
+        "--enable-static",
+        "--disable-shared",
+        "--disable-doc",
+        "--disable-gtk-doc",
+    ],
+    lib_source = ":all_srcs",
+    out_static_libs = ["libtasn1.a"],
+    visibility = ["//visibility:public"],
+)

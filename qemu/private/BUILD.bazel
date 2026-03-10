@@ -1,0 +1,9 @@
+# Private implementation details
+
+exports_files([
+    "libtpms.BUILD.bazel",
+    "libtasn1.BUILD.bazel",
+    "gmp.BUILD.bazel",
+    "json_glib.BUILD.bazel",
+    "swtpm.BUILD.bazel",
+])

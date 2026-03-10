@@ -1,0 +1,82 @@
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("//qemu:toolchain.bzl", "qemu_toolchain")
+load(":qemu_toolchain_test.bzl", "aarch64_test", "provides_info_test", "with_binaries_test")
+
+# --- Dummy firmware files for testing ---
+
+genrule(
+    name = "dummy_ovmf_code",
+    outs = ["dummy_code.fd"],
+    cmd = "dd if=/dev/zero of=$@ bs=1 count=64 2>/dev/null",
+)
+
+genrule(
+    name = "dummy_ovmf_vars",
+    outs = ["dummy_vars.fd"],
+    cmd = "dd if=/dev/zero of=$@ bs=1 count=64 2>/dev/null",
+)
+
+genrule(
+    name = "dummy_qemu_system",
+    outs = ["qemu-system-x86_64"],
+    cmd = "echo '#!/bin/sh' > $@ && chmod +x $@",
+)
+
+genrule(
+    name = "dummy_qemu_img",
+    outs = ["qemu-img"],
+    cmd = "echo '#!/bin/sh' > $@ && chmod +x $@",
+)
+
+# --- Test subjects ---
+
+qemu_toolchain(
+    name = "host_fallback_tc",
+    arch = "x86_64",
+    ovmf_code = ":dummy_ovmf_code",
+    ovmf_vars = ":dummy_ovmf_vars",
+)
+
+qemu_toolchain(
+    name = "explicit_binaries_tc",
+    arch = "x86_64",
+    ovmf_code = ":dummy_ovmf_code",
+    ovmf_vars = ":dummy_ovmf_vars",
+    qemu_img = ":dummy_qemu_img",
+    qemu_system = ":dummy_qemu_system",
+)
+
+qemu_toolchain(
+    name = "aarch64_tc",
+    arch = "aarch64",
+    ovmf_code = ":dummy_ovmf_code",
+    ovmf_vars = ":dummy_ovmf_vars",
+)
+
+# --- Analysis tests ---
+
+provides_info_test(
+    name = "provides_info_test",
+    target_under_test = ":host_fallback_tc",
+)
+
+with_binaries_test(
+    name = "with_binaries_test",
+    target_under_test = ":explicit_binaries_tc",
+)
+
+aarch64_test(
+    name = "aarch64_test",
+    target_under_test = ":aarch64_tc",
+)
+
+# --- Build tests: toolchain types load correctly ---
+
+build_test(
+    name = "toolchain_types_build_test",
+    targets = [
+        "//qemu:toolchain_type",
+        "//qemu:swtpm_type",
+        "//qemu:swtpm_setup_type",
+    ],
+)
