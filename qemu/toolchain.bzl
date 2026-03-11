@@ -5,9 +5,11 @@ QemuToolchainInfo = provider(
     fields = {
         "qemu_system": "File: qemu-system-{arch} binary (None if host fallback)",
         "qemu_img": "File: qemu-img binary (None if host fallback)",
-        "ovmf_code": "File: OVMF_CODE firmware (read-only pflash)",
-        "ovmf_vars": "File: OVMF_VARS template (writable pflash source)",
-        "arch": "string: x86_64 or aarch64",
+        "ovmf_code": "File: OVMF/AAVMF CODE firmware (read-only pflash)",
+        "ovmf_vars": "File: OVMF/AAVMF VARS template (writable pflash source)",
+        "arch": "string: guest architecture — x86_64 or aarch64",
+        "accel": "string: acceleration backend — kvm (Linux native), hvf (macOS native), tcg (cross-arch emulation, slow)",
+        "machine_type": "string: QEMU machine type — q35 (x86_64 guest) or virt (aarch64 guest)",
     },
 )
 
@@ -19,6 +21,8 @@ def _qemu_toolchain_impl(ctx):
             ovmf_code = ctx.file.ovmf_code,
             ovmf_vars = ctx.file.ovmf_vars,
             arch = ctx.attr.arch,
+            accel = ctx.attr.accel,
+            machine_type = ctx.attr.machine_type,
         ),
     )
     return [toolchain_info]
@@ -31,18 +35,28 @@ qemu_toolchain = rule(
         "ovmf_code": attr.label(
             mandatory = True,
             allow_single_file = True,
-            doc = "OVMF CODE firmware file",
+            doc = "OVMF/AAVMF CODE firmware file",
         ),
         "ovmf_vars": attr.label(
             mandatory = True,
             allow_single_file = True,
-            doc = "OVMF VARS template file",
+            doc = "OVMF/AAVMF VARS template file",
         ),
         "arch": attr.string(
             default = "x86_64",
             values = ["x86_64", "aarch64"],
-            doc = "Target architecture",
+            doc = "Guest target architecture",
+        ),
+        "accel": attr.string(
+            default = "kvm",
+            values = ["kvm", "hvf", "tcg"],
+            doc = "Acceleration backend: kvm (Linux native), hvf (macOS native), tcg (cross-arch, slow)",
+        ),
+        "machine_type": attr.string(
+            default = "q35",
+            values = ["q35", "virt"],
+            doc = "QEMU machine type: q35 for x86_64 guests, virt for aarch64 guests",
         ),
     },
-    doc = "Defines a QEMU toolchain with firmware and optional binaries.",
+    doc = "Defines a QEMU toolchain with firmware, optional binaries, and acceleration metadata.",
 )

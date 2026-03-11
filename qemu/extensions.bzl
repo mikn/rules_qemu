@@ -1,20 +1,65 @@
 """Module extension for QEMU toolchain registration."""
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("//qemu:repositories.bzl", "ovmf_repo", "qemu_toolchains_repo", "swtpm_host_repo")
+load("//qemu:repositories.bzl", "ovmf_repo", "qemu_host_repo", "qemu_toolchains_repo", "swtpm_host_repo")
 load("//qemu/private:versions.bzl", "OVMF_VERSIONS", "SWTPM_VERSIONS")
 
 _toolchain_tag = tag_class(
     attrs = {
         "qemu_version": attr.string(default = "9.2.0", doc = "QEMU version (for future hermetic downloads)"),
-        "ovmf_version": attr.string(default = "2025.02-8", doc = "OVMF firmware version"),
-        "ovmf_url": attr.string(doc = "Custom OVMF deb URL (overrides version lookup)"),
-        "ovmf_sha256": attr.string(doc = "Custom OVMF deb sha256 (required with ovmf_url)"),
+        "ovmf_version": attr.string(default = "2025.02-8", doc = "OVMF/AAVMF firmware version"),
         "swtpm_version": attr.string(default = "0.10.1", doc = "swtpm version to build from source"),
-        "swtpm_from_source": attr.bool(default = True, doc = "Build swtpm from source (False = host fallback)"),
+        "swtpm_from_source": attr.bool(
+            default = True,
+            doc = "Build swtpm from source (Linux only). False = use host swtpm on all platforms.",
+        ),
     },
     doc = "Configure the QEMU toolchain.",
 )
+
+# Each entry describes one toolchain registration.
+# Fields: exec_os, exec_cpu, guest_arch, accel, machine_type
+# native=True means exec and guest arch align (fast KVM/HVF).
+# native=False means cross-arch TCG emulation (slow, ~10-50x penalty).
+#
+# Native toolchains are listed first so Bazel prefers them over TCG ones
+# when the exec platform matches both.
+_TOOLCHAIN_MATRIX = [
+    # --- Native (KVM/HVF — fast) ---
+    struct(exec_os = "linux",  exec_cpu = "x86_64",  guest_arch = "x86_64",  accel = "kvm", machine_type = "q35",  native = True),
+    struct(exec_os = "linux",  exec_cpu = "aarch64", guest_arch = "aarch64", accel = "kvm", machine_type = "virt", native = True),
+    struct(exec_os = "macos",  exec_cpu = "aarch64", guest_arch = "aarch64", accel = "hvf", machine_type = "virt", native = True),
+    # --- Cross-architecture (TCG — slow) ---
+    struct(exec_os = "macos",  exec_cpu = "aarch64", guest_arch = "x86_64",  accel = "tcg", machine_type = "q35",  native = False),
+    struct(exec_os = "linux",  exec_cpu = "x86_64",  guest_arch = "aarch64", accel = "tcg", machine_type = "virt", native = False),
+    struct(exec_os = "linux",  exec_cpu = "aarch64", guest_arch = "x86_64",  accel = "tcg", machine_type = "q35",  native = False),
+]
+
+# Maps our simplified os/cpu strings to @platforms// constraint labels.
+_OS_CONSTRAINTS = {
+    "linux": "@platforms//os:linux",
+    "macos": "@platforms//os:macos",
+}
+
+# Note: @platforms//cpu:aarch64 and @platforms//cpu:arm64 are the SAME constraint
+# value in the platforms repo (arm64 is an alias for aarch64). We use aarch64
+# consistently throughout.
+_CPU_CONSTRAINTS = {
+    "x86_64":  "@platforms//cpu:x86_64",
+    "aarch64": "@platforms//cpu:aarch64",
+}
+
+def _toolchain_name(entry):
+    """Generates a unique toolchain identifier from a matrix entry."""
+    return "qemu_{exec_os}_{exec_cpu}_guest_{guest_arch}_{accel}".format(
+        exec_os = entry.exec_os,
+        exec_cpu = entry.exec_cpu,
+        guest_arch = entry.guest_arch,
+        accel = entry.accel,
+    )
+
+def _ovmf_repo_name(guest_arch):
+    return "qemu_ovmf_{}".format(guest_arch)
 
 def _qemu_impl(module_ctx):
     registrations = []
@@ -22,118 +67,177 @@ def _qemu_impl(module_ctx):
         for toolchain in mod.tags.toolchain:
             registrations.append(toolchain)
 
-    if not registrations:
-        return
-
-    # Use the first (root module) registration
-    reg = registrations[0]
-
-    # Set up OVMF repository
-    if reg.ovmf_url:
-        ovmf_url = reg.ovmf_url
-        ovmf_sha256 = reg.ovmf_sha256
-        ovmf_code_path = "usr/share/OVMF/OVMF_CODE_4M.secboot.fd"
-        ovmf_vars_path = "usr/share/OVMF/OVMF_VARS_4M.fd"
+    # Use the first (root module) registration, or fall back to tag-class defaults
+    # when no qemu.toolchain() tag is provided. This avoids breaking use_repo
+    # declarations even when no explicit configuration is present.
+    if registrations:
+        reg = registrations[0]
     else:
-        version_info = OVMF_VERSIONS.get(reg.ovmf_version)
-        if not version_info:
-            fail("Unknown OVMF version: {}. Available: {}".format(
-                reg.ovmf_version,
-                ", ".join(OVMF_VERSIONS.keys()),
-            ))
-        ovmf_url = version_info["url"]
-        ovmf_sha256 = version_info["sha256"]
-        ovmf_code_path = version_info["code_path"]
-        ovmf_vars_path = version_info["vars_path"]
+        # Mirror the defaults from _toolchain_tag so the extension behaves as
+        # if qemu.toolchain() was called with no arguments.
+        reg = struct(
+            qemu_version = "9.2.0",
+            ovmf_version = "2025.02-8",
+            swtpm_version = "0.10.1",
+            swtpm_from_source = True,
+        )
 
-    ovmf_repo(
-        name = "qemu_ovmf",
-        url = ovmf_url,
-        sha256 = ovmf_sha256,
-        code_path = ovmf_code_path,
-        vars_path = ovmf_vars_path,
-    )
+    # --- Resolve OVMF version info ---
+    version_info = OVMF_VERSIONS.get(reg.ovmf_version)
+    if not version_info:
+        fail("Unknown OVMF version: {}. Available: {}".format(
+            reg.ovmf_version,
+            ", ".join(OVMF_VERSIONS.keys()),
+        ))
 
-    # Set up swtpm
-    if reg.swtpm_from_source:
+    # Create per-arch firmware repos (x86_64 → OVMF, aarch64 → AAVMF)
+    for arch in ["x86_64", "aarch64"]:
+        arch_info = version_info.get(arch)
+        if not arch_info:
+            fail("No firmware info for arch '{}' in OVMF version '{}'".format(arch, reg.ovmf_version))
+        ovmf_repo(
+            name = _ovmf_repo_name(arch),
+            url = arch_info["url"],
+            sha256 = arch_info["sha256"],
+            code_path = arch_info["code_path"],
+            vars_path = arch_info["vars_path"],
+        )
+
+    # --- Resolve swtpm ---
+    # swtpm from source: only supported on Linux (uses configure_make with Linux toolchains).
+    # On macOS, skip source downloads entirely and always use the host swtpm regardless
+    # of the swtpm_from_source setting — building from source is not supported there.
+    host_os = module_ctx.os.name.lower()
+    is_macos = "mac" in host_os or "darwin" in host_os
+    if reg.swtpm_from_source and not is_macos:
         _setup_swtpm_from_source(reg.swtpm_version)
-        swtpm_label = "@qemu_swtpm_src//:swtpm"
-        swtpm_setup_label = "@qemu_swtpm_src//:swtpm_setup"
+        swtpm_src_label = "@qemu_swtpm_src//:swtpm"
+        swtpm_setup_src_label = "@qemu_swtpm_src//:swtpm_setup"
     else:
-        swtpm_host_repo(name = "qemu_swtpm")
-        swtpm_label = "@qemu_swtpm//:swtpm"
-        swtpm_setup_label = "@qemu_swtpm//:swtpm_setup"
+        swtpm_src_label = None
+        swtpm_setup_src_label = None
 
-    # Create the toolchains repository with wiring.
-    # Uses toolchain_info from toolchain_utils (ARM pattern) for individual
-    # executables, and the composite qemu_toolchain for OVMF + QEMU binaries.
-    build_content = """\
-load("@rules_qemu//qemu:toolchain.bzl", "qemu_toolchain")
-load("@toolchain_utils//toolchain/info:defs.bzl", "toolchain_info")
+    # Host swtpm repo (used on macOS and when swtpm_from_source=False)
+    swtpm_host_repo(name = "qemu_swtpm_host")
+    swtpm_host_label = "@qemu_swtpm_host//:swtpm"
+    swtpm_setup_host_label = "@qemu_swtpm_host//:swtpm_setup"
 
-# --- QEMU composite toolchain (OVMF + qemu-system + qemu-img) ---
+    # --- QEMU binaries ---
+    # Currently host-only on all platforms. A future version may add hermetic downloads.
+    qemu_host_repo(name = "qemu_system_host")
 
-qemu_toolchain(
-    name = "qemu_toolchain_x86_64",
-    arch = "x86_64",
-    ovmf_code = "@qemu_ovmf//:ovmf_code",
-    ovmf_vars = "@qemu_ovmf//:ovmf_vars",
-    visibility = ["//visibility:public"],
-)
+    # --- Generate toolchains repository BUILD content ---
+    # Accumulate all toolchain declarations as strings, then write them in one repo.
+    build_lines = [
+        'load("@rules_qemu//qemu:toolchain.bzl", "qemu_toolchain")',
+        'load("@toolchain_utils//toolchain/info:defs.bzl", "toolchain_info")',
+        "",
+        "# This file is generated by qemu/extensions.bzl — do not edit manually.",
+        "",
+    ]
 
-toolchain(
-    name = "qemu_x86_64_toolchain",
-    toolchain = ":qemu_toolchain_x86_64",
-    toolchain_type = "@rules_qemu//qemu:toolchain_type",
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-    visibility = ["//visibility:public"],
-)
+    # Track which swtpm toolchains have already been declared (one per exec platform)
+    swtpm_declared = {}
 
-# --- swtpm toolchains (ARM toolchain_info pattern) ---
+    for entry in _TOOLCHAIN_MATRIX:
+        tc_name = _toolchain_name(entry)
+        ovmf_repo_name = _ovmf_repo_name(entry.guest_arch)
+        exec_os_constraint = _OS_CONSTRAINTS[entry.exec_os]
+        exec_cpu_constraint = _CPU_CONSTRAINTS[entry.exec_cpu]
+        guest_cpu_constraint = _CPU_CONSTRAINTS[entry.guest_arch]
 
-toolchain_info(
-    name = "swtpm_info",
-    target = "{swtpm}",
-    variable = "SWTPM",
-)
+        # Choose QEMU binary label based on guest arch (host provides the binary)
+        qemu_system_label = "@qemu_system_host//:qemu-system-{}".format(entry.guest_arch)
+        qemu_img_label = "@qemu_system_host//:qemu-img"
 
-toolchain(
-    name = "swtpm_toolchain",
-    toolchain = ":swtpm_info",
-    toolchain_type = "@rules_qemu//qemu:swtpm_type",
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-    visibility = ["//visibility:public"],
-)
+        # qemu_toolchain rule (inner, provides QemuToolchainInfo)
+        build_lines += [
+            "# --- {} ---".format(tc_name),
+            'qemu_toolchain(',
+            '    name = "{}",'.format(tc_name),
+            '    arch = "{}",'.format(entry.guest_arch),
+            '    accel = "{}",'.format(entry.accel),
+            '    machine_type = "{}",'.format(entry.machine_type),
+            '    ovmf_code = "@{}//:ovmf_code",'.format(ovmf_repo_name),
+            '    ovmf_vars = "@{}//:ovmf_vars",'.format(ovmf_repo_name),
+            '    qemu_system = "{}",'.format(qemu_system_label),
+            '    qemu_img = "{}",'.format(qemu_img_label),
+            '    visibility = ["//visibility:public"],',
+            ")",
+            "",
+            "toolchain(",
+            '    name = "{}_toolchain",'.format(tc_name),
+            '    toolchain = ":{}", '.format(tc_name),
+            '    toolchain_type = "@rules_qemu//qemu:toolchain_type",',
+            "    exec_compatible_with = [",
+            '        "{}",'.format(exec_os_constraint),
+            '        "{}",'.format(exec_cpu_constraint),
+            "    ],",
+            # Only constrain by CPU architecture, not OS — QEMU can emulate any guest OS.
+            "    target_compatible_with = [",
+            '        "{}",'.format(guest_cpu_constraint),
+            "    ],",
+            '    visibility = ["//visibility:public"],',
+            ")",
+            "",
+        ]
 
-toolchain_info(
-    name = "swtpm_setup_info",
-    target = "{swtpm_setup}",
-    variable = "SWTPM_SETUP",
-)
+        # swtpm toolchains: one per exec platform (TPM is arch-agnostic).
+        # Key by (exec_os, exec_cpu) so we only declare each exec platform once.
+        swtpm_key = (entry.exec_os, entry.exec_cpu)
+        if swtpm_key not in swtpm_declared:
+            swtpm_declared[swtpm_key] = True
+            swtpm_tc_base = "swtpm_{}_{}".format(entry.exec_os, entry.exec_cpu)
 
-toolchain(
-    name = "swtpm_setup_toolchain",
-    toolchain = ":swtpm_setup_info",
-    toolchain_type = "@rules_qemu//qemu:swtpm_setup_type",
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-    visibility = ["//visibility:public"],
-)
-""".format(
-        swtpm = swtpm_label,
-        swtpm_setup = swtpm_setup_label,
-    )
+            # Choose swtpm source: from-source for Linux, host fallback for macOS
+            if entry.exec_os == "linux" and swtpm_src_label != None:
+                swtpm_label = swtpm_src_label
+                swtpm_setup_label = swtpm_setup_src_label
+            else:
+                swtpm_label = swtpm_host_label
+                swtpm_setup_label = swtpm_setup_host_label
+
+            build_lines += [
+                "# --- swtpm for exec {}/{} ---".format(entry.exec_os, entry.exec_cpu),
+                "toolchain_info(",
+                '    name = "{}_swtpm_info",'.format(swtpm_tc_base),
+                '    target = "{}",'.format(swtpm_label),
+                '    variable = "SWTPM",',
+                ")",
+                "",
+                "toolchain(",
+                '    name = "{}_swtpm_toolchain",'.format(swtpm_tc_base),
+                '    toolchain = ":{}_swtpm_info",'.format(swtpm_tc_base),
+                '    toolchain_type = "@rules_qemu//qemu:swtpm_type",',
+                "    exec_compatible_with = [",
+                '        "{}",'.format(exec_os_constraint),
+                '        "{}",'.format(exec_cpu_constraint),
+                "    ],",
+                '    visibility = ["//visibility:public"],',
+                ")",
+                "",
+                "toolchain_info(",
+                '    name = "{}_swtpm_setup_info",'.format(swtpm_tc_base),
+                '    target = "{}",'.format(swtpm_setup_label),
+                '    variable = "SWTPM_SETUP",',
+                ")",
+                "",
+                "toolchain(",
+                '    name = "{}_swtpm_setup_toolchain",'.format(swtpm_tc_base),
+                '    toolchain = ":{}_swtpm_setup_info",'.format(swtpm_tc_base),
+                '    toolchain_type = "@rules_qemu//qemu:swtpm_setup_type",',
+                "    exec_compatible_with = [",
+                '        "{}",'.format(exec_os_constraint),
+                '        "{}",'.format(exec_cpu_constraint),
+                "    ],",
+                '    visibility = ["//visibility:public"],',
+                ")",
+                "",
+            ]
+
     qemu_toolchains_repo(
         name = "qemu_toolchains",
-        build_file_content = build_content,
+        build_file_content = "\n".join(build_lines),
     )
 
 def _setup_swtpm_from_source(swtpm_version):
@@ -248,6 +352,7 @@ PCEOF""",
 
 qemu = module_extension(
     implementation = _qemu_impl,
+    os_dependent = True,
     tag_classes = {
         "toolchain": _toolchain_tag,
     },

@@ -1,12 +1,22 @@
 """Version -> URL + sha256 mappings for QEMU-related binaries."""
 
-# OVMF firmware versions (from Debian packages)
+# OVMF/AAVMF firmware versions (from Debian packages), keyed by version then arch.
+# x86_64: OVMF (ovmf package from edk2), uses OVMF_CODE_4M.secboot.fd + OVMF_VARS_4M.fd
+# aarch64: AAVMF (qemu-efi-aarch64 package from edk2), uses AAVMF_CODE.secboot.fd + AAVMF_VARS.fd
 OVMF_VERSIONS = {
     "2025.02-8": {
-        "url": "https://snapshot.debian.org/archive/debian/20250828T025831Z/pool/main/e/edk2/ovmf_2025.02-8_all.deb",
-        "sha256": "d82312d863b18aebde958133144185c45685d3c6e1d217b4969913d713c05bf7",
-        "code_path": "usr/share/OVMF/OVMF_CODE_4M.secboot.fd",
-        "vars_path": "usr/share/OVMF/OVMF_VARS_4M.fd",
+        "x86_64": {
+            "url": "https://snapshot.debian.org/archive/debian/20250828T025831Z/pool/main/e/edk2/ovmf_2025.02-8_all.deb",
+            "sha256": "d82312d863b18aebde958133144185c45685d3c6e1d217b4969913d713c05bf7",
+            "code_path": "usr/share/OVMF/OVMF_CODE_4M.secboot.fd",
+            "vars_path": "usr/share/OVMF/OVMF_VARS_4M.fd",
+        },
+        "aarch64": {
+            "url": "https://snapshot.debian.org/archive/debian/20250828T025831Z/pool/main/e/edk2/qemu-efi-aarch64_2025.02-8_all.deb",
+            "sha256": "4f2fd058b799145b8bba4b7297cb6b5b3ff1ab528b49b3c82eb287f8de56401f",
+            "code_path": "usr/share/AAVMF/AAVMF_CODE.secboot.fd",
+            "vars_path": "usr/share/AAVMF/AAVMF_VARS.fd",
+        },
     },
 }
 

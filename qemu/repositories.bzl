@@ -185,22 +185,130 @@ def _swtpm_host_repo_impl(rctx):
     swtpm_setup = rctx.which("swtpm_setup")
 
     if swtpm == None:
-        fail("swtpm not found on host. Install with: apt install swtpm swtpm-tools")
+        fail(
+            "swtpm not found on host. Install with:\n" +
+            "  macOS:        brew install swtpm\n" +
+            "  Debian/Ubuntu: apt install swtpm swtpm-tools",
+        )
     if swtpm_setup == None:
-        fail("swtpm_setup not found on host. Install with: apt install swtpm-tools")
+        fail(
+            "swtpm_setup not found on host. Install with:\n" +
+            "  macOS:        brew install swtpm\n" +
+            "  Debian/Ubuntu: apt install swtpm-tools",
+        )
 
-    # Create symlinks to host binaries
-    rctx.symlink(swtpm, "swtpm")
-    rctx.symlink(swtpm_setup, "swtpm_setup")
+    # Simple wrapper scripts — the host binary already has its library paths
+    # resolved via its own rpath or the system dynamic linker configuration.
+    rctx.file("swtpm.sh", content = """\
+#!/bin/bash
+exec "{swtpm}" "$@"
+""".format(swtpm = swtpm), executable = True)
 
-    rctx.file("BUILD.bazel", content = """
-exports_files(["swtpm", "swtpm_setup"], visibility = ["//visibility:public"])
+    rctx.file("swtpm_setup.sh", content = """\
+#!/bin/bash
+exec "{swtpm_setup}" "$@"
+""".format(swtpm_setup = swtpm_setup), executable = True)
+
+    rctx.file("BUILD.bazel", content = """\
+sh_binary(
+    name = "swtpm",
+    srcs = ["swtpm.sh"],
+    visibility = ["//visibility:public"],
+)
+
+sh_binary(
+    name = "swtpm_setup",
+    srcs = ["swtpm_setup.sh"],
+    visibility = ["//visibility:public"],
+)
 """)
 
 swtpm_host_repo = repository_rule(
     implementation = _swtpm_host_repo_impl,
     local = True,
-    doc = "Wraps host swtpm binaries for use in Bazel.",
+    doc = "Wraps host swtpm binaries for use in Bazel. Supports Linux and macOS.",
+)
+
+def _qemu_host_repo_impl(rctx):
+    """Creates a repository that wraps host QEMU binaries.
+
+    Searches for qemu-system-x86_64, qemu-system-aarch64, and qemu-img on the
+    host PATH. For each binary that is found, creates a wrapper sh_binary target.
+    For each binary that is NOT found, creates a stub sh_binary that prints an
+    error and exits 1 at execution time. This ensures all targets always exist
+    at analysis time, and toolchain declarations for missing binaries only fail
+    when actually invoked rather than during Bazel analysis.
+
+    Fails with an actionable error if no QEMU system emulator is found at all.
+    """
+    qemu_x86_64 = rctx.which("qemu-system-x86_64")
+    qemu_aarch64 = rctx.which("qemu-system-aarch64")
+    qemu_img = rctx.which("qemu-img")
+
+    if qemu_x86_64 == None and qemu_aarch64 == None:
+        fail(
+            "No QEMU system emulators found on host PATH. Install with:\n" +
+            "  macOS:        brew install qemu\n" +
+            "  Debian/Ubuntu: apt install qemu-system-x86 qemu-system-arm",
+        )
+
+    build_targets = []
+
+    for binary, path in [
+        ("qemu-system-x86_64", qemu_x86_64),
+        ("qemu-system-aarch64", qemu_aarch64),
+    ]:
+        script_name = binary + ".sh"
+        if path != None:
+            rctx.file(script_name, content = """\
+#!/bin/bash
+exec "{path}" "$@"
+""".format(path = path), executable = True)
+        else:
+            rctx.file(script_name, content = """\
+#!/bin/bash
+echo "error: {binary} not found on host PATH. Install with:" >&2
+echo "  macOS:        brew install qemu" >&2
+echo "  Debian/Ubuntu: apt install qemu-system-x86 qemu-system-arm" >&2
+exit 1
+""".format(binary = binary), executable = True)
+        build_targets.append("""\
+sh_binary(
+    name = "{binary}",
+    srcs = ["{script}"],
+    visibility = ["//visibility:public"],
+)
+""".format(binary = binary, script = script_name))
+
+    # qemu-img: always create the target, stub if missing
+    qemu_img_script = "qemu-img.sh"
+    if qemu_img != None:
+        rctx.file(qemu_img_script, content = """\
+#!/bin/bash
+exec "{path}" "$@"
+""".format(path = qemu_img), executable = True)
+    else:
+        rctx.file(qemu_img_script, content = """\
+#!/bin/bash
+echo "error: qemu-img not found on host PATH. Install with:" >&2
+echo "  macOS:        brew install qemu" >&2
+echo "  Debian/Ubuntu: apt install qemu-utils" >&2
+exit 1
+""", executable = True)
+    build_targets.append("""\
+sh_binary(
+    name = "qemu-img",
+    srcs = ["qemu-img.sh"],
+    visibility = ["//visibility:public"],
+)
+""")
+
+    rctx.file("BUILD.bazel", content = "\n".join(build_targets))
+
+qemu_host_repo = repository_rule(
+    implementation = _qemu_host_repo_impl,
+    local = True,
+    doc = "Wraps host QEMU binaries for use in Bazel. Supports Linux and macOS.",
 )
 
 def _qemu_toolchains_repo_impl(rctx):

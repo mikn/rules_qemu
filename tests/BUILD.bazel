@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("//qemu:toolchain.bzl", "qemu_toolchain")
-load(":qemu_toolchain_test.bzl", "aarch64_test", "provides_info_test", "with_binaries_test")
+load(":qemu_toolchain_test.bzl", "aarch64_test", "hvf_aarch64_test", "provides_info_test", "tcg_test", "with_binaries_test")
 
 # --- Dummy firmware files for testing ---
 
@@ -30,9 +30,12 @@ genrule(
 
 # --- Test subjects ---
 
+# Default: x86_64 + kvm + q35 (implicit defaults)
 qemu_toolchain(
     name = "host_fallback_tc",
     arch = "x86_64",
+    accel = "kvm",
+    machine_type = "q35",
     ovmf_code = ":dummy_ovmf_code",
     ovmf_vars = ":dummy_ovmf_vars",
 )
@@ -40,15 +43,40 @@ qemu_toolchain(
 qemu_toolchain(
     name = "explicit_binaries_tc",
     arch = "x86_64",
+    accel = "kvm",
+    machine_type = "q35",
     ovmf_code = ":dummy_ovmf_code",
     ovmf_vars = ":dummy_ovmf_vars",
     qemu_img = ":dummy_qemu_img",
     qemu_system = ":dummy_qemu_system",
 )
 
+# aarch64 native KVM/HVF
 qemu_toolchain(
     name = "aarch64_tc",
     arch = "aarch64",
+    accel = "kvm",
+    machine_type = "virt",
+    ovmf_code = ":dummy_ovmf_code",
+    ovmf_vars = ":dummy_ovmf_vars",
+)
+
+# x86_64 cross-arch via TCG (e.g. running on ARM host)
+qemu_toolchain(
+    name = "tcg_x86_64_tc",
+    arch = "x86_64",
+    accel = "tcg",
+    machine_type = "q35",
+    ovmf_code = ":dummy_ovmf_code",
+    ovmf_vars = ":dummy_ovmf_vars",
+)
+
+# aarch64 native via HVF (macOS Apple Silicon)
+qemu_toolchain(
+    name = "hvf_aarch64_tc",
+    arch = "aarch64",
+    accel = "hvf",
+    machine_type = "virt",
     ovmf_code = ":dummy_ovmf_code",
     ovmf_vars = ":dummy_ovmf_vars",
 )
@@ -68,6 +96,16 @@ with_binaries_test(
 aarch64_test(
     name = "aarch64_test",
     target_under_test = ":aarch64_tc",
+)
+
+tcg_test(
+    name = "tcg_test",
+    target_under_test = ":tcg_x86_64_tc",
+)
+
+hvf_aarch64_test(
+    name = "hvf_aarch64_test",
+    target_under_test = ":hvf_aarch64_tc",
 )
 
 # --- Build tests: toolchain types load correctly ---
