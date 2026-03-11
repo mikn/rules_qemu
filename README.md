@@ -38,13 +38,19 @@ qemu.toolchain(
 
 ### macOS Prerequisites
 
-QEMU and swtpm must be installed via Homebrew on macOS (hermetic builds are not yet supported):
+QEMU must be installed via Homebrew on macOS (hermetic builds are not yet supported):
 
 ```sh
-brew install qemu swtpm
+brew install qemu
 ```
 
-On macOS, swtpm is always sourced from the host regardless of the `swtpm_from_source` setting. Source archives are not downloaded on macOS.
+When building swtpm from source (the default), autotools and pkg-config are also required:
+
+```sh
+brew install autoconf automake libtool pkg-config
+```
+
+To use a host-installed swtpm instead, set `swtpm_from_source = False` and install via `brew install swtpm`.
 
 ### Linux Prerequisites
 
@@ -79,8 +85,8 @@ def _my_rule_impl(ctx):
     accel        = qemu_info.accel         # "kvm", "hvf", or "tcg"
     machine_type = qemu_info.machine_type  # "q35" or "virt"
 
-    # qemu_system and qemu_img are None for host-fallback toolchains;
-    # use rctx.which("qemu-system-x86_64") or pass them via host_tools.
+    # qemu_system and qemu_img are stub scripts that invoke the host-installed
+    # QEMU binaries (resolved via PATH at runtime).
     qemu_bin = qemu_info.qemu_system
 
     swtpm = ctx.toolchains[SWTPM_TOOLCHAIN_TYPE].executable
@@ -113,12 +119,12 @@ load("@rules_qemu//qemu:defs.bzl",
 
 Both packages come from the same Debian snapshot timestamp for reproducibility.
 
-**swtpm** is built from source on Linux with all dependencies statically linked:
+**swtpm** is built from source with all dependencies statically linked:
 - `libtpms` v0.10.2 (TPM emulation)
 - `json-glib` v1.10.8, `libtasn1` v4.19.0, `gmp` v6.3.0
 - `openssl` and `glib` from BCR (forced static via `cc_static_only`)
 
-The resulting `swtpm` and `swtpm_setup` binaries have zero runtime dependencies beyond libc. On macOS, the host swtpm is used instead (`brew install swtpm`).
+The resulting `swtpm` and `swtpm_setup` binaries have zero runtime dependencies beyond libc and work on both Linux and macOS.
 
 **QEMU** binaries are currently sourced from the host PATH on all platforms. A future version may add hermetic downloads.
 

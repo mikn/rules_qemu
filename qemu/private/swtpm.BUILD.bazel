@@ -41,12 +41,13 @@ configure_make(
         "--enable-static",
         "--disable-shared",
         # These tools are checked by configure but only used by tests/scripts,
-        # not during compilation. Stub them to pass the checks.
-        "EXPECT=/bin/true",
-        "GAWK=/usr/bin/gawk",
-        "SOCAT=/bin/true",
-        "BASE64=/usr/bin/base64",
-        "CP=/bin/cp",
+        # not during compilation. Stub them with /usr/bin/true to pass the
+        # checks portably across Linux and macOS.
+        "EXPECT=/usr/bin/true",
+        "GAWK=/usr/bin/true",
+        "SOCAT=/usr/bin/true",
+        "BASE64=/usr/bin/true",
+        "CP=/usr/bin/true",
     ],
     env = {
         # Point pkg-config at stub .pc files for BCR-provided deps (glib, openssl).
