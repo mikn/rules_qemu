@@ -1,1 +1,5 @@
 # rules_qemu - QEMU toolchain provider for Bazel
+
+# gazelle:prefix github.com/mikn/rules_qemu
+# gazelle:resolve go github.com/mikn/rules_qemu/vm @rules_qemu//vm
+# gazelle:resolve go github.com/mikn/rules_qemu/agentpb @rules_qemu//agentpb

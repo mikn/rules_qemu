@@ -122,6 +122,40 @@ The resulting `swtpm` and `swtpm_setup` binaries have zero runtime dependencies 
 
 **QEMU** binaries are currently sourced from the host PATH on all platforms. A future version may add hermetic downloads.
 
+## Go Packages
+
+### `vm` — VM lifecycle management
+
+Low-level QEMU process management with functional options:
+
+```go
+import "github.com/mikn/rules_qemu/vm"
+
+v, err := vm.Start(ctx,
+    vm.WithKernelBoot(kernel, initrd, "console=ttyS0"),
+    vm.WithMemory("2G"),
+    vm.WithCPUs(2),
+    vm.WithUEFI(ovmfCode, ovmfVars),
+    vm.WithTPM(swtpm, swtpmSetup),
+    vm.WithAgent(),
+    vm.WithSerialCapture(),
+    vm.WithQMP(),
+)
+defer v.Kill()
+```
+
+Provides QMP client, serial console capture, 9P sharing, TPM management, and agent connection.
+
+### `agent` — Guest agent binary
+
+Static Go binary (~4MB) that runs inside VMs, serving RPC over virtio-serial (`/dev/virtio-ports/org.vmtest.agent`). Implements command execution, systemd unit queries, port checks, and file operations.
+
+Include in guest images via `@rules_qemu//agent:agent_tar`.
+
+### `agentpb` — Shared RPC types
+
+Request/response types for host-guest communication: `ExecRequest`, `ExecResponse`, `UnitRequest`, `UnitResponse`, `FileRequest`, `FileResponse`, `PortRequest`, `PortResponse`.
+
 ## Architecture Notes
 
 - `exec_compatible_with` constrains the HOST machine where QEMU runs
