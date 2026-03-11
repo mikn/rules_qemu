@@ -273,7 +273,7 @@ echo "  Debian/Ubuntu: apt install qemu-system-x86 qemu-system-arm" >&2
 exit 1
 """.format(binary = binary), executable = True)
         build_targets.append("""\
-sh_binary(
+filegroup(
     name = "{binary}",
     srcs = ["{script}"],
     visibility = ["//visibility:public"],
@@ -296,7 +296,7 @@ echo "  Debian/Ubuntu: apt install qemu-utils" >&2
 exit 1
 """, executable = True)
     build_targets.append("""\
-sh_binary(
+filegroup(
     name = "qemu-img",
     srcs = ["qemu-img.sh"],
     visibility = ["//visibility:public"],
