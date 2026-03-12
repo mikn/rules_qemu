@@ -1,6 +1,8 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//qemu:toolchain.bzl", "qemu_toolchain")
 load(":qemu_toolchain_test.bzl", "aarch64_test", "hvf_aarch64_test", "provides_info_test", "tcg_test", "with_binaries_test")
+load(":verify.bzl", "verify_tar_test")
 
 # --- Dummy firmware files for testing ---
 
@@ -117,4 +119,21 @@ build_test(
         "//qemu:swtpm_type",
         "//qemu:swtpm_setup_type",
     ],
+)
+
+# --- Imperative tests: agent tar content verification ---
+
+verify_tar_test(
+    name = "agent_tar_contents_test",
+    tar = "//agent:agent_tar",
+    assertions = "assertions/agent_tar.txt",
+)
+
+# --- Imperative tests: agent service file content validation ---
+
+sh_test(
+    name = "agent_service_content_test",
+    srcs = ["verify_service.sh"],
+    args = ["$(location //agent:agent_tar)"],
+    data = ["//agent:agent_tar"],
 )

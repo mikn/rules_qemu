@@ -1,0 +1,5 @@
+# Agent tar: binary + service file + enable symlink
+file usr/lib/vmtest/agent
+file etc/systemd/system/vmtest-agent.service
+mode etc/systemd/system/vmtest-agent.service 0644
+symlink etc/systemd/system/multi-user.target.wants/vmtest-agent.service /etc/systemd/system/vmtest-agent.service
