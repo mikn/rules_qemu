@@ -159,6 +159,25 @@ func TestAgentCheckPortClosed(t *testing.T) {
 	}
 }
 
+func TestResolveAddr(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", "127.0.0.1"},
+		{"localhost", "127.0.0.1"},
+		{"192.168.1.1", "192.168.1.1"},
+		{"10.0.0.1", "10.0.0.1"},
+		{"::1", "::1"},
+	}
+	for _, tt := range tests {
+		got := resolveAddr(tt.input)
+		if got != tt.want {
+			t.Errorf("resolveAddr(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestAgentCheckPortOpen(t *testing.T) {
 	// Start a listener on a random port
 	ln, err := net.Listen("tcp", "localhost:0")
