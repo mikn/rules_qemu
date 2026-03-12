@@ -24,6 +24,7 @@ go_test(
     name = "vm_test",
     srcs = [
         "agentconn_test.go",
+        "disk_test.go",
         "serial_test.go",
         "vm_test.go",
     ],
