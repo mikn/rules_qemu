@@ -149,18 +149,31 @@ func appendStorageArgs(args []string, c *Config) []string {
 		return args
 	}
 
+	format := c.diskFormat
+	if format == "" {
+		format = "raw"
+	}
+
 	bootFromISO := c.iso != ""
+	kernelBoot := c.kernel != ""
 	if bootFromISO {
 		args = append(args,
 			"-device", "virtio-scsi-pci,id=scsi0,addr=0x4",
 			"-drive", fmt.Sprintf("file=%s,format=raw,cache=none,media=cdrom,if=none,id=cd0", c.iso),
 			"-device", "scsi-cd,bus=scsi0.0,drive=cd0,bootindex=0",
-			"-drive", fmt.Sprintf("file=%s,format=raw,if=none,id=disk", diskPath),
+			"-drive", fmt.Sprintf("file=%s,format=%s,if=none,id=disk", diskPath, format),
 			"-device", "virtio-blk-pci,drive=disk,addr=0x5,bootindex=1",
+		)
+	} else if kernelBoot {
+		// With -kernel boot, QEMU implicitly assigns bootindex 0 to the
+		// kernel. Omit bootindex on the disk to avoid a conflict.
+		args = append(args,
+			"-drive", fmt.Sprintf("file=%s,format=%s,if=none,id=disk", diskPath, format),
+			"-device", "virtio-blk-pci,drive=disk,addr=0x5",
 		)
 	} else {
 		args = append(args,
-			"-drive", fmt.Sprintf("file=%s,format=raw,if=none,id=disk", diskPath),
+			"-drive", fmt.Sprintf("file=%s,format=%s,if=none,id=disk", diskPath, format),
 			"-device", "virtio-blk-pci,drive=disk,addr=0x5,bootindex=0",
 		)
 	}
