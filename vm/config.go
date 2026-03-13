@@ -27,6 +27,7 @@ type Config struct {
 	// Storage
 	diskSize     string
 	existingDisk string
+	diskFormat   string // "raw" (default) or "qcow2"
 
 	// TPM
 	swtpm        string
@@ -162,6 +163,12 @@ func WithDisk(size string) Option {
 // WithExistingDisk uses an existing disk image file.
 func WithExistingDisk(path string) Option {
 	return func(c *Config) { c.existingDisk = path }
+}
+
+// WithDiskFormat sets the disk image format ("raw" or "qcow2").
+// Defaults to "raw" if not set.
+func WithDiskFormat(format string) Option {
+	return func(c *Config) { c.diskFormat = format }
 }
 
 // WithTPM enables TPM 2.0 emulation with the given swtpm binaries.

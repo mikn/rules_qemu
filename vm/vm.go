@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ type VM struct {
 	cmd     *exec.Cmd
 	pm      *processManager
 	workDir string
+	sockDir string // socket directory under /tmp; removed on Kill
 	serial  *SerialConsole
 	qmp     *QMPClient
 	ctx     context.Context
@@ -111,6 +113,7 @@ func Start(ctx context.Context, opts ...Option) (*VM, error) {
 			cancel()
 			return nil, fmt.Errorf("failed to create socket directory: %w", err)
 		}
+		vm.sockDir = sockDir
 		if cfg.enableQMP {
 			cfg.qmpSocketPath = filepath.Join(sockDir, "qmp.sock")
 		}
@@ -124,6 +127,7 @@ func Start(ctx context.Context, opts ...Option) (*VM, error) {
 	cmd := exec.CommandContext(vmCtx, cfg.qemuBinary, args...)
 
 	// For serial capture mode, pipe stdout. For serial stdio mode, attach terminal.
+	var stderrBuf bytes.Buffer
 	if cfg.serialMode == serialSocket {
 		// Serial output goes to QEMU's stdout via -serial stdio.
 		// Capture it via StdoutPipe — survives guest reboots with no buffering issues.
@@ -133,6 +137,11 @@ func Start(ctx context.Context, opts ...Option) (*VM, error) {
 			return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 		}
 		vm.serial = newSerialConsole(pipe)
+		// Prevent QEMU from reading the parent process's stdin (e.g. a Bazel
+		// persistent worker's WorkRequest stream). exec.Cmd with Stdin == nil
+		// connects the child's stdin to /dev/null.
+		cmd.Stdin = nil
+		cmd.Stderr = &stderrBuf
 	} else if cfg.serialMode == serialStdio {
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
@@ -142,7 +151,7 @@ func Start(ctx context.Context, opts ...Option) (*VM, error) {
 	if err := cmd.Start(); err != nil {
 		vm.pm.cleanupAll()
 		cancel()
-		return nil, fmt.Errorf("failed to start QEMU: %w", err)
+		return nil, fmt.Errorf("failed to start QEMU: %w\nstderr: %s", err, stderrBuf.String())
 	}
 	vm.cmd = cmd
 	vm.pm.addProcess(cmd)
@@ -151,7 +160,11 @@ func Start(ctx context.Context, opts ...Option) (*VM, error) {
 	if cfg.enableQMP {
 		qmpClient, err := newQMPClient(cfg.qmpSocketPath)
 		if err != nil {
+			stderrOut := stderrBuf.String()
 			vm.Kill()
+			if stderrOut != "" {
+				return nil, fmt.Errorf("failed to connect QMP: %w\nQEMU stderr: %s", err, stderrOut)
+			}
 			return nil, fmt.Errorf("failed to connect QMP: %w", err)
 		}
 		vm.qmp = qmpClient
@@ -188,6 +201,10 @@ func (vm *VM) Kill() error {
 		vm.qmp.Close()
 	}
 	vm.pm.cleanupAll()
+	if vm.sockDir != "" {
+		os.RemoveAll(vm.sockDir)
+		vm.sockDir = ""
+	}
 	return nil
 }
 
